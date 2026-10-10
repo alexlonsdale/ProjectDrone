@@ -1,49 +1,36 @@
-% Clear any existing serial connections to free up the port
-clear s;
+import socket
+import serial
 
-% --- CONFIGURATION ---
-% Update portName based on your OS:
-% Windows: "COM3" (check Device Manager)
-% Linux:   "/dev/ttyUSB0" or "/dev/ttyACM0"
-% Mac:     "/dev/cu.usbserial-XXXX"
-portName = "/dev/ttyUSB0"; 
-baudRate = 115200;
-% ---------------------
+# Configure your serial port and baud rate
+SERIAL_PORT = "/dev/ttyUSB0"
+BAUD_RATE = 115200
 
-% Initialize serial port connection
-s = serialport(portName, baudRate);
-configureTerminator(s, "LF"); % Match ESP32's Serial.println() newline terminator
+# Set up local TCP server socket
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server_socket.bind(("127.0.0.1", 5000))
+server_socket.listen(1)
 
-disp("Listening for serial data from ESP32... Press Ctrl+C in MATLAB to stop.");
+print(
+    f"Bridge running: Listening for MATLAB on localhost:5000 (reading"
+    f" {SERIAL_PORT})..."
+)
 
-try
-    while true
-        if s.NumBytesAvailable > 0
-            % Read the incoming comma-separated text line
-            dataLine = readline(s);
-
-            % Parse the three float values (Pitch, Yaw, Roll rates)
-            parsedData = sscanf(dataLine, '%f,%f,%f');
-
-            if length(parsedData) == 3
-                pitchRate = parsedData(1);
-                yawRate   = parsedData(2);
-                rollRate  = parsedData(3);
-
-                % Display decoded values cleanly in the command window
-                fprintf('Pitch: %6.2f deg/s | Yaw: %6.2f deg/s | Roll: %6.2f deg/s\n', ...
-                    pitchRate, yawRate, rollRate);
-            else
-                % Catches boot messages or minor text glitches safely without crashing
-                fprintf('Ignored / Raw: %s\n', strtrim(dataLine));
-            end
-        end
-    end
-catch ME
-    % Ensure the serial port object is cleared if you manually break the loop
-    clear s;
-    disp("Serial port closed.");
-    if ~strcmp(ME.identifier, 'MATLAB:class:InvalidHandle') && ~contains(ME.message, 'Interrupted')
-        rethrow(ME);
-    end
-end
+try:
+  ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+  while True:
+    client_socket, addr = server_socket.accept()
+    print(f"MATLAB connected from {addr}")
+    while True:
+      try:
+        line = ser.readline().decode("utf-8")
+        if line:
+          client_socket.sendall(line.encode("utf-8"))
+      except (socket.error, IOError):
+        print("MATLAB disconnected. Waiting for reconnection...")
+        client_socket.close()
+        break
+except KeyboardInterrupt:
+  print("Bridge closed.")
+finally:
+  server_socket.close()
