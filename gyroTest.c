@@ -14,9 +14,9 @@ const int MPU_ADDRESS = 0x68;
 const int BUTTON_PIN = 0; // Built-in BOOT button on GPIO 0
 
 // --- USER-ADJUSTABLE VARIABLES ---
-const float GYRO_SCALE_FACTOR = 131.0; 
-const int   DEAD_ZONE         = 20;    
-const int   WINDOW_SIZE       = 10;    
+const float GYRO_SCALE_FACTOR = 131.0; // Conversion factor for ±250 °/s range
+const int   DEAD_ZONE         = 20;    // Raw threshold below which values clamp to 0
+const int   WINDOW_SIZE       = 10;    // Moving average smoothing window size
 // ---------------------------------
 
 int32_t gyro_x_offset = 0, gyro_y_offset = 0, gyro_z_offset = 0;
@@ -93,7 +93,7 @@ void calibrateMPU() {
 void setup() {
   Serial.begin(115200);
   Wire.begin(21, 22);
-  Wire.setClock(400000); 
+  Wire.setClock(400000); // 400kHz I2C
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
@@ -116,28 +116,29 @@ void setup() {
 }
 
 void loop() {
-  // Check if the BOOT button is pressed (active low)
+  // Check if the BOOT button is pressed (active low) to trigger re-calibration
   if (digitalRead(BUTTON_PIN) == LOW) {
     calibrateMPU();
     delay(300); // Debounce delay
   }
 
   Wire.beginTransmission(MPU_ADDRESS);
-  Wire.write(0x43); 
+  Wire.write(0x43); // GYRO_XOUT_H
   Wire.endTransmission(false);
   Wire.requestFrom(MPU_ADDRESS, 6, true);
 
   if (Wire.available() == 6) {
-    // Fixed missing bit-shift operators here:
     int16_t raw_gx = ((Wire.read() << 8) | Wire.read()) - gyro_x_offset;
     int16_t raw_gy = ((Wire.read() << 8) | Wire.read()) - gyro_y_offset;
     int16_t raw_gz = ((Wire.read() << 8) | Wire.read()) - gyro_z_offset;
 
+    // Store in history arrays
     gx_history[sample_index] = raw_gx;
     gy_history[sample_index] = raw_gy;
     gz_history[sample_index] = raw_gz;
     sample_index = (sample_index + 1) % WINDOW_SIZE;
 
+    // Calculate moving average
     int32_t sum_gx = 0, sum_gy = 0, sum_gz = 0;
     for (int i = 0; i < WINDOW_SIZE; i++) {
       sum_gx += gx_history[i];
@@ -149,14 +150,24 @@ void loop() {
     int16_t filtered_gy = sum_gy / WINDOW_SIZE;
     int16_t filtered_gz = sum_gz / WINDOW_SIZE;
 
+    // Apply Dead Zone Threshold on raw values before conversion
     if (abs(filtered_gx) < DEAD_ZONE) filtered_gx = 0;
     if (abs(filtered_gy) < DEAD_ZONE) filtered_gy = 0;
     if (abs(filtered_gz) < DEAD_ZONE) filtered_gz = 0;
 
+    // Convert filtered raw values to degrees per second
     float deg_gx = (float)filtered_gx / GYRO_SCALE_FACTOR;
     float deg_gy = (float)filtered_gy / GYRO_SCALE_FACTOR;
     float deg_gz = (float)filtered_gz / GYRO_SCALE_FACTOR;
 
+    // --- STREAM TO MATLAB (Comma-separated string) ---
+    Serial.print(deg_gx);
+    Serial.print(",");
+    Serial.print(deg_gy);
+    Serial.print(",");
+    Serial.println(deg_gz);
+
+    // Update OLED Display with angular velocity values
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
@@ -177,5 +188,5 @@ void loop() {
     display.display();
   }
 
-  delay(50);
+  delay(20); // 50Hz update loop rate for responsive MATLAB parsing
 }
