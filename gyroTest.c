@@ -5,19 +5,23 @@
 // OLED display specifications
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define OLED_RESET    -1 // Reset pin # (or -1 if sharing Arduino reset pin)
-#define SCREEN_ADDRESS 0x3C // Common I2C address for 128x64 OLEDs (try 0x3D if it doesn't load)
+#define OLED_RESET    -1
+#define SCREEN_ADDRESS 0x3C 
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 const int MPU_ADDRESS = 0x68;
 
+// --- USER-ADJUSTABLE VARIABLES ---
+const float GYRO_SCALE_FACTOR = 131.0; // Conversion factor for ±250 °/s range
+const int   DEAD_ZONE         = 20;    // Raw threshold below which values clamp to 0
+const int   WINDOW_SIZE       = 10;    // Moving average smoothing window size
+// ---------------------------------
+
 // Calibration offsets
 int32_t gyro_x_offset = 0, gyro_y_offset = 0, gyro_z_offset = 0;
-int32_t accel_x_offset = 0, accel_y_offset = 0, accel_z_offset = 0;
 
-// Moving Average Filter Settings for Gyro
-const int WINDOW_SIZE = 10;
+// Moving Average Filter Arrays
 int16_t gx_history[WINDOW_SIZE] = {0};
 int16_t gy_history[WINDOW_SIZE] = {0};
 int16_t gz_history[WINDOW_SIZE] = {0};
@@ -26,29 +30,22 @@ int sample_index = 0;
 void calibrateMPU() {
   display.clearDisplay();
   display.setCursor(0, 0);
-  display.print("Calibrating...\nKeep sensor still!");
+  display.print(F("Calibrating...\nKeep sensor still!"));
   display.display();
 
   int num_samples = 300;
   int32_t sum_gx = 0, sum_gy = 0, sum_gz = 0;
-  int32_t sum_ax = 0, sum_ay = 0, sum_az = 0;
 
   for (int i = 0; i < num_samples; i++) {
     Wire.beginTransmission(MPU_ADDRESS);
-    Wire.write(0x3B);
+    Wire.write(0x43); // Start at Gyro registers
     Wire.endTransmission(false);
-    Wire.requestFrom(MPU_ADDRESS, 14, true);
+    Wire.requestFrom(MPU_ADDRESS, 6, true);
 
-    if (Wire.available() == 14) {
-      int16_t ax = (Wire.read() << 8) | Wire.read();
-      int16_t ay = (Wire.read() << 8) | Wire.read();
-      int16_t az = (Wire.read() << 8) | Wire.read();
-      Wire.read(); Wire.read(); // Skip temp
+    if (Wire.available() == 6) {
       int16_t gx = (Wire.read() << 8) | Wire.read();
       int16_t gy = (Wire.read() << 8) | Wire.read();
       int16_t gz = (Wire.read() << 8) | Wire.read();
-
-      sum_ax += ax; sum_ay += ay; sum_az += az;
       sum_gx += gx; sum_gy += gy; sum_gz += gz;
     }
     delay(3);
@@ -62,11 +59,10 @@ void calibrateMPU() {
 void setup() {
   Serial.begin(115200);
   Wire.begin(21, 22);
-  Wire.setClock(400000); // 400kHz fast I2C for smooth screen updates
+  Wire.setClock(400000); // 400kHz I2C
 
-  // Initialize SSD1306 OLED display
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println(F("SSD1306 allocation failed. Check wiring/address!"));
+    Serial.println(F("SSD1306 allocation failed."));
     while(1);
   }
 
@@ -82,7 +78,7 @@ void setup() {
 
 void loop() {
   Wire.beginTransmission(MPU_ADDRESS);
-  Wire.write(0x43); // Start reading from Gyro registers (GYRO_XOUT_H)
+  Wire.write(0x43); // GYRO_XOUT_H
   Wire.endTransmission(false);
   Wire.requestFrom(MPU_ADDRESS, 6, true);
 
@@ -91,12 +87,13 @@ void loop() {
     int16_t raw_gy = ((Wire.read() << 8) | Wire.read()) - gyro_y_offset;
     int16_t raw_gz = ((Wire.read() << 8) | Wire.read()) - gyro_z_offset;
 
-    // Apply Moving Average Filter
+    // Store in history arrays
     gx_history[sample_index] = raw_gx;
     gy_history[sample_index] = raw_gy;
     gz_history[sample_index] = raw_gz;
     sample_index = (sample_index + 1) % WINDOW_SIZE;
 
+    // Calculate moving average
     int32_t sum_gx = 0, sum_gy = 0, sum_gz = 0;
     for (int i = 0; i < WINDOW_SIZE; i++) {
       sum_gx += gx_history[i];
@@ -108,26 +105,36 @@ void loop() {
     int16_t filtered_gy = sum_gy / WINDOW_SIZE;
     int16_t filtered_gz = sum_gz / WINDOW_SIZE;
 
-    // Update OLED Display
+    // Apply Dead Zone Threshold on raw values before conversion
+    if (abs(filtered_gx) < DEAD_ZONE) filtered_gx = 0;
+    if (abs(filtered_gy) < DEAD_ZONE) filtered_gy = 0;
+    if (abs(filtered_gz) < DEAD_ZONE) filtered_gz = 0;
+
+    // Convert filtered raw values to degrees per second
+    float deg_gx = (float)filtered_gx / GYRO_SCALE_FACTOR;
+    float deg_gy = (float)filtered_gy / GYRO_SCALE_FACTOR;
+    float deg_gz = (float)filtered_gz / GYRO_SCALE_FACTOR;
+
+    // Update OLED Display with angular velocity values
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     
     display.setCursor(0, 0);
-    display.println(F("MPU6500 Gyro Data"));
+    display.println(F("Gyro Speed (deg/s)"));
     display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
     display.setCursor(0, 18);
-    display.print("GX: "); display.println(filtered_gx);
+    display.print("GX: "); display.print(deg_gx, 1); display.println(" deg/s");
 
     display.setCursor(0, 32);
-    display.print("GY: "); display.println(filtered_gy);
+    display.print("GY: "); display.print(deg_gy, 1); display.println(" deg/s");
 
     display.setCursor(0, 46);
-    display.print("GZ: "); display.println(filtered_gz);
+    display.print("GZ: "); display.print(deg_gz, 1); display.println(" deg/s");
 
     display.display();
   }
 
-  delay(50); // Refresh rate limit for readable text
+  delay(50);
 }
