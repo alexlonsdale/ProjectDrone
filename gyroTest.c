@@ -33,8 +33,15 @@ void calibrateMPU() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.print(F("Calibrating...\nKeep still on flat surface"));
+
+
+
+    display.setCursor(0, 0);
+  display.println(F("Calibration Routine"));
+  display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
+  
+  display.setCursor(0, 18);
+  display.println(F("Keep still on flat surface."));
   display.display();
   
   // 1-second delay to ensure device is still before sampling
