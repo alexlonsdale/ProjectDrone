@@ -38,7 +38,7 @@ The flight controller is being developed entirely from scratch in C++.
 
 ## Development Roadmap
 
-- [ ] **Phase 1: Component Bench Testing**
+- [x] **Phase 1: Component Bench Testing**
   - Verify MPU6500 I2C/SPI communication with ESP32.
   - Calibrate ESC and test PWM motor driving at 6S voltages.
 - [ ] **Phase 2: Mechanical Assembly**
@@ -51,5 +51,4 @@ The flight controller is being developed entirely from scratch in C++.
   - Integrate custom RC interface for pilot-in-the-loop control.
   - Expand flight envelope from basic hovering to full 6-DOF manual flight.
 
----
-*Note: This project involves high-current 6S Li-Po batteries and open-rotor brushless motors. All bench tests involving the ESC should be conducted with propellers removed.*
+
